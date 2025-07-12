@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package greet;
+
+// 👇 Esta línea es clave
+option go_package = "/proto;proto";
+// option go_package = "grpc-multiplex/proto;proto";
+
+service GreetService {
+  rpc Greet(GreetRequest) returns (stream GreetResponse);
+}
+
+message GreetRequest {
+  string name = 1;
+}
+
+message GreetResponse {
+  string message = 1;
+}
