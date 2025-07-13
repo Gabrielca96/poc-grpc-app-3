@@ -1,0 +1,68 @@
+name: Build & Deploy to GitOps
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  ECR_REGISTRY: 590184058323.dkr.ecr.us-east-1.amazonaws.com
+  IMAGE_NAME: odihnx-poc-grpc-app-3
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and Push Docker image
+        run: |
+          IMAGE_TAG=$(git rev-parse --short HEAD)
+          docker build -t $ECR_REGISTRY/$IMAGE_NAME:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$IMAGE_NAME:$IMAGE_TAG
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+
+      - name: Checkout GitOps Repo
+        uses: actions/checkout@v3
+        with:
+          repository: Gabrielca96/odihnx-k8s-apps  # Agrega el owner si no es el mismo
+          token: ${{ secrets.PAT_GITHUB }}
+          path: gitops
+
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+            -O /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update values.yaml
+        run: |
+          cd gitops/apps/grpc-3
+          yq e '.image.repository = strenv(ECR_REGISTRY) + "/" + strenv(IMAGE_NAME)' -i values.yaml
+          yq e '.image.tag = strenv(GITHUB_SHA)' -i values.yaml
+        env:
+          ECR_REGISTRY: ${{ env.ECR_REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Commit and Push to GitOps
+        run: |
+          cd gitops
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "Update grpc-3 image to ${{ github.sha }}" || echo "No changes to commit"
+          git push
